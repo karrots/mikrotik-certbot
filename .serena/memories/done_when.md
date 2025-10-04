@@ -1,0 +1,4 @@
+- All tests pass: `uv run --with dev pytest`.
+- Lint and type checks pass: `uv run --with dev ruff check .` and `uv run --with dev mypy .`.
+- pyproject metadata validates (build succeeds): `uv run -m hatch build`.
+- Manual dry-run performs expected gated/no-op behavior with clear logs.

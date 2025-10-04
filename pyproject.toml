@@ -1,0 +1,81 @@
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mikrotik-certbot"
+version = "1.0.0"
+description = "Certbot deploy hook script to upload renewed Let's Encrypt certificates to a MikroTik RouterOS device via the REST API."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [
+  { name = "Jonathan Karras", email = "6307688+karrots@users.noreply.github.com" }
+]
+keywords = ["mikrotik", "certbot", "letsencrypt", "routeros", "automation", "certificate"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Intended Audience :: System Administrators",
+  "Topic :: Internet :: Name Service (DNS)",
+  "Topic :: Security :: Cryptography"
+]
+
+# Runtime dependencies
+dependencies = [
+  "requests>=2.32.0",
+  "paramiko>=3.4.0",
+  "cryptography>=41.0.0",
+]
+
+[project.scripts]
+mikrotik-certbot = "mikrotik_certbot.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/karrots/mikrotik-certbot"
+Repository = "https://github.com/karrots/mikrotik-certbot"
+Issues = "https://github.com/karrots/mikrotik-certbot/issues"
+
+[tool.uv]
+# Development dependencies installed with: `uv sync --dev` or used implicitly by `uv run --with dev`.
+dev-dependencies = [
+  "ruff>=0.6.0",
+  "mypy>=1.11.0",
+  "pytest>=8.2.0",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# Mirror top-level settings in the newer lint section to avoid the deprecation warning
+select = ["E", "F", "I", "UP", "B", "S", "C4", "W"]
+ignore = ["T201", "S113", "S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+warn_return_any = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+no_implicit_optional = true
+strict_equality = true
+# This is a simple script; allow dynamic typing where not annotated.
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "-q"
+python_files = ["test_*.py", "*_test.py"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["mikrotik_certbot"]

@@ -1,0 +1,4 @@
+- Python 3.11+ with type hints; mypy configured with strict warnings but allows untyped defs in places.
+- Ruff configured (line-length 120; targets py311; selected rules E,F,I,UP,B,S,C4,W; ignores T201,S113,S101).
+- Console output uses clear INFO/WARN/DEBUG and emojis for step markers; avoid destructive actions unless explicitly configured.
+- Env-driven configuration; aggressively validate required paths; keep dry-run semantics.
