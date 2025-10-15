@@ -37,9 +37,9 @@ Homepage = "https://github.com/karrots/mikrotik-certbot"
 Repository = "https://github.com/karrots/mikrotik-certbot"
 Issues = "https://github.com/karrots/mikrotik-certbot/issues"
 
-[tool.uv]
-# Development dependencies installed with: `uv sync --dev` or used implicitly by `uv run --with dev`.
-dev-dependencies = [
+[dependency-groups]
+# Development dependencies. Install with `uv sync --group dev`.
+dev = [
   "ruff>=0.6.0",
   "mypy>=1.11.0",
   "pytest>=8.2.0",
@@ -72,6 +72,7 @@ strict_equality = true
 # This is a simple script; allow dynamic typing where not annotated.
 disallow_untyped_defs = false
 ignore_missing_imports = true
+disable_error_code = ["import-untyped"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

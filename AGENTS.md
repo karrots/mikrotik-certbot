@@ -51,9 +51,9 @@ Naming: `CERT_NAME` optional override.
 ## 7. Developer Workflows
 Using uv:
 - Run: `uv run mikrotik-certbot`
-- Lint: `uv run --with dev ruff check .`
-- Types: `uv run --with dev mypy .`
-- Tests: `uv run --with dev pytest`
+- Lint: `uv run --group dev ruff check .`
+- Types: `uv run --group dev mypy .`
+- Tests: `uv run --group dev pytest`
 - Build: `uv build`
 Test focus areas: naming (`tests/test_naming.py`), pruning (`tests/test_prune.py`), collision/import logic (`tests/test_collision_and_import.py`).
 
