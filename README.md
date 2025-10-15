@@ -10,6 +10,7 @@ A Certbot deploy-hook tool that uploads renewed Let’s Encrypt certificates to 
   - [Initial Setup (Certbot deploy hook)](#initial-setup-certbot-deploy-hook)
   - [Application Flow](#application-flow)
   - [More Documentation](#more-documentation)
+  - [Developer Workflows](#developer-workflows)
   - [License \& Authors](#license--authors)
 
 ## Highlights
@@ -26,8 +27,13 @@ A Certbot deploy-hook tool that uploads renewed Let’s Encrypt certificates to 
 
 ## Initial Setup (Certbot deploy hook)
 1) Install `uv` if needed: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-2) Copy the hook: `sudo cp deploy-hook.sh /etc/letsencrypt/renewal-hooks/deploy/mikrotik-certbot.sh && sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/mikrotik-certbot.sh`
-3) Set minimal environment for the renewal context (via systemd/env file or edit deploy-hook.sh):
+2) Download the hook directly (no repository clone required). Replace the example URL with the raw file URL for this repo:
+
+No repository clone required — download the hook directly:
+
+```sh
+sudo curl -fsSL "https://raw.githubusercontent.com/karrots/mikrotik-certbot/refs/heads/main/deploy-hook.sh" -o /etc/letsencrypt/renewal-hooks/deploy/mikrotik-certbot.sh
+```
    - `MIKROTIK_DOMAIN`: your FQDN (must appear in `RENEWED_DOMAINS`)
    - `ROUTER_HOST`: e.g., `router.example.net:8443`
    - `ROUTER_USER` / `ROUTER_PASS`: least‑privilege credentials
@@ -45,10 +51,11 @@ The hook exits early unless `MIKROTIK_DOMAIN` is present in `RENEWED_DOMAINS`. I
 - RouterOS Permissions: `docs/permissions.md`
 
 ## Developer Workflows
+- Sync dev deps: `uv sync --group dev`
 - Run: `uv run mikrotik-certbot`
-- Lint: `uv run --with dev ruff check .`
-- Types: `uv run --with dev mypy .`
-- Tests: `uv run --with dev pytest`
+- Lint: `uv run --group dev ruff check .`
+- Types: `uv run --group dev mypy .`
+- Tests: `uv run --group dev pytest`
 - Build: `uv build`
 
 ## License & Authors
