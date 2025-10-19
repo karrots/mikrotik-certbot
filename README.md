@@ -2,6 +2,11 @@
 
 A Certbot deploy-hook tool that uploads renewed Let’s Encrypt certificates to MikroTik RouterOS devices and applies them to services. It is idempotent and non‑destructive: imports under a versioned name, applies to targets, then prunes older unreferenced certificates.
 
+Why not just use the built in ACME support?
+- EAB authentication is broken in ROS 7.20 and lower.
+- Router may not have access to the Internet
+- Renewal of services like hotspot not supported by the built in ACME service. 
+
 ## Contents
 - [mikrotik-certbot](#mikrotik-certbot)
   - [Contents](#contents)
