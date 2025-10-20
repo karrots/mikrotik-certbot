@@ -2,9 +2,7 @@
 
 This project is configured entirely via environment variables. Values are parsed at runtime; no files are written or modified. Booleans accept any of: `1`, `true`, `yes`, `on` (case‑insensitive). Defaults are shown in parentheses.
 
-## Required (Certbot context)
-- `RENEWED_LINEAGE` (no default): Absolute path to the renewed lineage directory provided by Certbot, and must contain `privkey.pem` and `fullchain.pem`.
-- `RENEWED_DOMAINS` (no default): Space‑separated domains for the renewed certificate (from Certbot). Used for gating.
+## Required
 - `MIKROTIK_DOMAIN` (default `your.domain.com`): Target domain that must appear in `RENEWED_DOMAINS` or the run is skipped.
 
 ## RouterOS connection
@@ -26,6 +24,11 @@ This project is configured entirely via environment variables. Values are parsed
 - `FULL_HTTP_DEBUG` (default `false`): Include response bodies with redaction and size limiting.
 - `HTTP_DEBUG_BODY_LIMIT` (default `2000`): Max characters of body to print when `FULL_HTTP_DEBUG=1`.
 - `SFTP_AUTO_ACCEPT_HOST_KEY` (default `true`): For SFTP fallback, automatically accept unknown SSH host keys. Set to `false` to enforce host key verification.
+
+## Internal Usage
+The below environment variables are provided by Certbot at run time. If manually testing script without Certbot, dummy data will need to be provided.
+- `RENEWED_LINEAGE` (Provided by Certbot): Absolute path to the renewed lineage directory provided by Certbot, and must contain `privkey.pem` and `fullchain.pem`.
+- `RENEWED_DOMAINS` (Provided by Certbot): Space‑separated domains for the renewed certificate (from Certbot). Used for gating.
 
 ## Name/collision rules (reference)
 - Canonical: `domain.tld` → `domain_tld_YYYYMMDDThhmm` (UTC). Collisions append `_SEQ` (last 6 hex chars of the local serial), then `_1`, `_2`, … if needed.

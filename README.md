@@ -33,15 +33,13 @@ Why not just use the built in ACME support?
 ## Initial Setup (Certbot deploy hook)
 1) Install `uv` if needed: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 2) Download the hook directly (no repository clone required). Replace the example URL with the raw file URL for this repo:
-
-No repository clone required — download the hook directly:
-
 ```sh
 sudo curl -fsSL "https://raw.githubusercontent.com/karrots/mikrotik-certbot/refs/heads/main/deploy-hook.sh" -o /etc/letsencrypt/renewal-hooks/deploy/mikrotik-certbot.sh
 ```
-   - `MIKROTIK_DOMAIN`: your FQDN (must appear in `RENEWED_DOMAINS`)
-   - `ROUTER_HOST`: e.g., `router.example.net:8443`
-   - `ROUTER_USER` / `ROUTER_PASS`: least‑privilege credentials
+3) Edit the following variables in the downloaded `/etc/letsencrypt/renewal-hooks/deploy/mikrotik-certbot.sh` file:
+    - `MIKROTIK_DOMAIN`: your FQDN (must appear in `RENEWED_DOMAINS`)
+    - `ROUTER_HOST`: e.g., `router.example.net:8443`
+    - `ROUTER_USER` / `ROUTER_PASS`: least‑privilege credentials for RouterOS access
 4) Verify with a dry‑run: `sudo certbot renew --dry-run --deploy-hook /etc/letsencrypt/renewal-hooks/deploy/mikrotik-certbot.sh`
 5) If multiple hosts need certificates duplicate the `deploy-hook.sh` as needed.
 

@@ -28,7 +28,7 @@ SCRIPT_DIR="$(dirname -- "$SCRIPT_PATH")"
 # PyPI or git spec usable by uvx. Examples:
 #   mikrotik-certbot                 (latest from PyPI)
 #   mikrotik-certbot==0.1.0          (pinned PyPI)
-#   git+https://github.com/user/repo@tag
+#   git+https://github.com/karrots/mikrotik-certbot@tag
 : "${MIKROTIK_CERTBOT_SPEC:=mikrotik-certbot}"
 
 # Force a fresh resolution each run (set UVX_REFRESH=1) -> adds --refresh
