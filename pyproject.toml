@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mikrotik-certbot"
-version = "1.0.0"
+version = "1.0.2"
 description = "Certbot deploy hook script to upload renewed Let's Encrypt certificates to a MikroTik RouterOS device via the REST API."
 readme = "README.md"
 license = { file = "LICENSE" }
