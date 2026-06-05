@@ -218,12 +218,6 @@ def run(settings: Settings) -> bool:
         else:
             update_ip_service(client, "www-ssl", cert_name)
 
-    if settings.update_api_ssl:
-        if settings.dry_run:
-            print("DRY-RUN: Would apply certificate to service 'api-ssl'")
-        else:
-            update_ip_service(client, "api-ssl", cert_name)
-
     if settings.hotspot_profiles:
         for profile in settings.hotspot_profiles:
             if settings.dry_run:
@@ -232,6 +226,12 @@ def run(settings: Settings) -> bool:
                 update_hotspot_profile(client, cert_name, profile)
     elif settings.debug:
         print("DEBUG: Skipping Hotspot step because profile list is empty after parsing")
+
+    if settings.update_api_ssl:
+        if settings.dry_run:
+            print("DRY-RUN: Would apply certificate to service 'api-ssl'")
+        else:
+            update_ip_service(client, "api-ssl", cert_name)
 
     # Show pruning as an explicit step. Only perform pruning if we actually
     # imported a new certificate (to avoid removing certificates when we merely
