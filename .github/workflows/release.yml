@@ -44,10 +44,13 @@ jobs:
       with:
         tag_name: ${{ github.event.inputs.tag || github.ref_name }}
         files: |
-          dist/**
+          dist/*.whl
+          dist/*.tar.gz
 
     - name: Upload dist as workflow artifacts (backup)
       uses: actions/upload-artifact@v4
       with:
         name: dist
-        path: dist/**
+        path: |
+          dist/*.whl
+          dist/*.tar.gz
