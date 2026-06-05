@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # ruff: noqa: E501, S110, S112
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -190,6 +191,12 @@ def confirm_file_exists(client: RouterOSClient, remote_filename: str) -> None:
         print(f"WARN: Could not confirm uploaded file presence: {exc}")
 
 
+def _remote_file_exists(client: RouterOSClient, remote_filename: str) -> bool:
+    resp = client.get("file", params={"name": remote_filename}, timeout=15, label=f"file verify '{remote_filename}'")
+    resp.raise_for_status()
+    return bool(resp.json())
+
+
 def confirm_certificate_present(client: RouterOSClient, cert_name: str) -> None:
     try:
         resp = client.get("certificate", params={"name": cert_name}, timeout=20, label=f"post-import cert confirm '{cert_name}'")
@@ -201,6 +208,12 @@ def confirm_certificate_present(client: RouterOSClient, cert_name: str) -> None:
                 print(f"WARN: Certificate '{cert_name}' not found immediately after import.")
     except Exception as exc:  # noqa: BLE001
         print(f"WARN: Could not confirm certificate presence: {exc}")
+
+
+def _certificate_exists(client: RouterOSClient, cert_name: str) -> bool:
+    resp = client.get("certificate", params={"name": cert_name}, timeout=20, label=f"certificate verify '{cert_name}'")
+    resp.raise_for_status()
+    return bool(resp.json())
 
 
 def find_existing_certificate(client: RouterOSClient, cert_name: str):
@@ -244,6 +257,29 @@ def find_certificate_by_serial(client: RouterOSClient, serial_hex: str | None):
     return None
 
 
+def _verify_after_connection_error(
+    client: RouterOSClient,
+    *,
+    action: str,
+    verifier,
+    attempts: int = 6,
+    delay: float = 2.0,
+) -> bool:
+    for attempt in range(1, attempts + 1):
+        try:
+            if verifier():
+                print(f"✅ {action} verified after API reconnect.")
+                return True
+            print(f"WARN: API is reachable but {action} is not reflected yet.")
+        except requests.RequestException as exc:
+            print(f"INFO: Waiting for API reconnect after {action} ({attempt}/{attempts}): {exc}")
+
+        if attempt < attempts:
+            time.sleep(delay)
+
+    return False
+
+
 def upload_certificate(client: RouterOSClient, remote_filename: str, cert_name: str, *, supports_type_file: bool) -> None:
     print("\n🔄 Step 1: Combining and Uploading Certificate...")
     try:
@@ -284,7 +320,15 @@ def _upload_rest_add(client: RouterOSClient, remote_filename: str, combined_cert
         payload = {"name": remote_filename, "contents": combined_cert, "type": "file"}
         return client.post("file/add", json=payload, timeout=30, label=f"file/add upload '{remote_filename}'")
 
-    resp = attempt()
+    try:
+        resp = attempt()
+    except requests.RequestException as exc:
+        print(f"WARN: API connection dropped during REST upload '{remote_filename}': {exc}")
+        return _verify_after_connection_error(
+            client,
+            action=f"REST upload '{remote_filename}'",
+            verifier=lambda: _remote_file_exists(client, remote_filename),
+        )
     if resp.ok:
         return True
     if resp.status_code == 400:
@@ -296,7 +340,15 @@ def _upload_rest_add(client: RouterOSClient, remote_filename: str, combined_cert
         if overwrite and isinstance(detail, str) and "already exists" in detail.lower():
             print("INFO: File exists – attempting delete then re-upload...")
             if delete_uploaded_file(client, remote_filename):
-                resp = attempt()
+                try:
+                    resp = attempt()
+                except requests.RequestException as exc:
+                    print(f"WARN: API connection dropped during REST re-upload '{remote_filename}': {exc}")
+                    return _verify_after_connection_error(
+                        client,
+                        action=f"REST re-upload '{remote_filename}'",
+                        verifier=lambda: _remote_file_exists(client, remote_filename),
+                    )
                 if resp.ok:
                     return True
                 print(f"ERROR: Re-upload after delete failed HTTP {resp.status_code}")
@@ -351,7 +403,15 @@ def delete_uploaded_file(client: RouterOSClient, remote_filename: str) -> bool:
         if not file_id:
             print("INFO: File entry lacks .id; cannot delete.")
             return False
-        del_resp = client.delete(f"file/{file_id}", timeout=15, label=f"file delete '{remote_filename}' id={file_id}")
+        try:
+            del_resp = client.delete(f"file/{file_id}", timeout=15, label=f"file delete '{remote_filename}' id={file_id}")
+        except requests.RequestException as exc:
+            print(f"WARN: API connection dropped while deleting uploaded file '{remote_filename}': {exc}")
+            return _verify_after_connection_error(
+                client,
+                action=f"uploaded file delete '{remote_filename}'",
+                verifier=lambda: not _remote_file_exists(client, remote_filename),
+            )
         if del_resp.ok:
             print("INFO: Existing file deleted.")
             return True
@@ -385,12 +445,41 @@ def import_new_certificate(client: RouterOSClient, remote_filename: str, cert_na
     # Ensure the private key cannot be exported after import
     # RouterOS accepts the hyphenated form `no-key-export=yes`.
     payload = {"name": cert_name, "file-name": remote_filename, "passphrase": "", "no-key-export": "yes"}
-    response = client.post("certificate/import", json=payload, label=f"certificate import '{cert_name}' from '{remote_filename}'")
+    try:
+        response = client.post(
+            "certificate/import",
+            json=payload,
+            label=f"certificate import '{cert_name}' from '{remote_filename}'",
+        )
+    except requests.RequestException as exc:
+        print(f"WARN: API connection dropped during certificate import '{cert_name}': {exc}")
+        if _verify_after_connection_error(
+            client,
+            action=f"certificate import '{cert_name}'",
+            verifier=lambda: _certificate_exists(client, cert_name),
+        ):
+            return
+        raise RuntimeError(f"Could not verify certificate import '{cert_name}' after API reconnect attempts.") from exc
     response.raise_for_status()
     print("✅ New certificate imported.")
 
 
-def update_ip_service(client: RouterOSClient, service_name: str, cert_name: str) -> None:
+def _service_uses_certificate(client: RouterOSClient, service_name: str, cert_name: str) -> bool:
+    response = client.get("ip/service", params={"name": service_name}, label=f"service verify '{service_name}'")
+    response.raise_for_status()
+    services = response.json()
+    return bool(services and services[0].get("certificate") == cert_name)
+
+
+def update_ip_service(
+    client: RouterOSClient,
+    service_name: str,
+    cert_name: str,
+    *,
+    verify_after_connection_error: bool = True,
+    reconnect_attempts: int = 6,
+    reconnect_delay: float = 2.0,
+) -> None:
     print(f"\n🔄 Step 4: Applying certificate to IP service '{service_name}'...")
     response = client.get("ip/service", params={"name": service_name}, label=f"service lookup '{service_name}'")
     response.raise_for_status()
@@ -398,11 +487,40 @@ def update_ip_service(client: RouterOSClient, service_name: str, cert_name: str)
     if services:
         service_id = services[0][".id"]
         payload = {"certificate": cert_name}
-        patch_response = client.patch(f"ip/service/{service_id}", json=payload, label=f"service patch '{service_name}' apply cert '{cert_name}'")
+        try:
+            patch_response = client.patch(
+                f"ip/service/{service_id}",
+                json=payload,
+                label=f"service patch '{service_name}' apply cert '{cert_name}'",
+            )
+        except requests.RequestException as exc:
+            if not verify_after_connection_error:
+                raise
+            print(f"WARN: API connection dropped while applying '{service_name}' certificate: {exc}")
+            if _verify_after_connection_error(
+                client,
+                action=f"IP service '{service_name}' certificate update",
+                verifier=lambda: _service_uses_certificate(client, service_name, cert_name),
+                attempts=reconnect_attempts,
+                delay=reconnect_delay,
+            ):
+                return
+            raise RuntimeError(f"Could not verify '{service_name}' certificate after API reconnect attempts.") from exc
         patch_response.raise_for_status()
         print(f"✅ Certificate applied to '{service_name}'.")
     else:
         print(f"⚠️ Service '{service_name}' not found.")
+
+
+def _hotspot_profile_uses_certificate(client: RouterOSClient, profile_name: str, cert_name: str) -> bool:
+    response = client.get(
+        "ip/hotspot/profile",
+        params={"name": profile_name},
+        label=f"hotspot profile verify '{profile_name}'",
+    )
+    response.raise_for_status()
+    profiles = response.json()
+    return bool(profiles and profiles[0].get("ssl-certificate") == cert_name)
 
 
 def update_hotspot_profile(client: RouterOSClient, cert_name: str, profile_name: str) -> None:
@@ -413,11 +531,23 @@ def update_hotspot_profile(client: RouterOSClient, cert_name: str, profile_name:
     if profiles:
         profile_id = profiles[0][".id"]
         payload = {"ssl-certificate": cert_name}
-        patch_response = client.patch(
-            f"ip/hotspot/profile/{profile_id}",
-            json=payload,
-            label=f"hotspot profile patch '{profile_name}' apply cert '{cert_name}'",
-        )
+        try:
+            patch_response = client.patch(
+                f"ip/hotspot/profile/{profile_id}",
+                json=payload,
+                label=f"hotspot profile patch '{profile_name}' apply cert '{cert_name}'",
+            )
+        except requests.RequestException as exc:
+            print(f"WARN: API connection dropped while applying Hotspot profile '{profile_name}' certificate: {exc}")
+            if _verify_after_connection_error(
+                client,
+                action=f"Hotspot profile '{profile_name}' certificate update",
+                verifier=lambda: _hotspot_profile_uses_certificate(client, profile_name, cert_name),
+            ):
+                return
+            raise RuntimeError(
+                f"Could not verify Hotspot profile '{profile_name}' certificate after API reconnect attempts."
+            ) from exc
         patch_response.raise_for_status()
         print(f"✅ Certificate applied to Hotspot profile '{profile_name}'.")
     else:
@@ -554,4 +684,3 @@ def prune_old_certificates(client: RouterOSClient, domain: str, current_cert_nam
                 print(f"WARN: Failed to delete cert '{name}' HTTP {del_resp.status_code}")
         except requests.RequestException as exc:
             print(f"WARN: Exception deleting cert '{name}': {exc}")
-
