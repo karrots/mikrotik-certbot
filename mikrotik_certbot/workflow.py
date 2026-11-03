@@ -20,9 +20,12 @@ from .routeros import (
     import_new_certificate,
     prune_old_certificates,
     remove_old_certificate,
+    restart_www_ssl_via_ssh,
     update_hotspot_profile,
     update_ip_service,
+    update_www_ssl_via_ssh,
     upload_certificate,
+    wait_for_rest_api,
 )
 
 __all__ = ["run", "determine_certificate_name"]
@@ -214,9 +217,31 @@ def run(settings: Settings) -> bool:
 
     if settings.update_www_ssl:
         if settings.dry_run:
-            print("DRY-RUN: Would apply certificate to service 'www-ssl'")
+            print("DRY-RUN: Would use SSH to disable 'www-ssl', assign certificate, wait 2s, and re-enable it")
+            print(
+                "DRY-RUN: Would wait "
+                f"{settings.www_ssl_settle_seconds}s and verify REST API readiness after 'www-ssl'"
+            )
+            print("DRY-RUN: Would restart only 'www-ssl' via SSH if REST readiness remained unavailable")
         else:
-            update_ip_service(client, "www-ssl", cert_name)
+            update_www_ssl_via_ssh(client, cert_name)
+            try:
+                wait_for_rest_api(client, initial_delay=settings.www_ssl_settle_seconds)
+            except RuntimeError as initial_rest_error:
+                try:
+                    restart_www_ssl_via_ssh(client)
+                except RuntimeError as ssh_error:
+                    raise RuntimeError(
+                        "REST API did not recover after www-ssl update, and SSH recovery failed: "
+                        f"{ssh_error}"
+                    ) from ssh_error
+                try:
+                    wait_for_rest_api(client, initial_delay=0)
+                except RuntimeError as recovery_rest_error:
+                    raise RuntimeError(
+                        "REST API did not recover after SSH restarted www-ssl "
+                        f"(initial readiness failure: {initial_rest_error}; recovery failure: {recovery_rest_error})"
+                    ) from recovery_rest_error
 
     if settings.hotspot_profiles:
         for profile in settings.hotspot_profiles:

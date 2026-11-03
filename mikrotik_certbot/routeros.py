@@ -24,6 +24,9 @@ __all__ = [
     "extract_remote_serial",
     "import_new_certificate",
     "remove_old_certificate",
+    "restart_www_ssl_via_ssh",
+    "update_www_ssl_via_ssh",
+    "wait_for_rest_api",
     "update_hotspot_profile",
     "update_ip_service",
     "prune_old_certificates",
@@ -367,26 +370,101 @@ def _upload_rest_add(client: RouterOSClient, remote_filename: str, combined_cert
 
 
 def _sftp_upload(client: RouterOSClient, remote_filename: str, combined_cert: str) -> bool:
-    host = client.hostname
-    username, password = client.auth
+    ssh: paramiko.SSHClient | None = None
     try:
-        ssh = paramiko.SSHClient()
-        # Respect configured policy: auto-accept unknown host keys only when enabled.
-        if client.settings.sftp_auto_accept_host_key:
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # noqa: S507 - intentional: accept host key for SFTP uploads
-        else:
-            # Be explicit: reject unknown host keys to avoid accidental trust.
-            ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
-        ssh.connect(host, port=22, username=username, password=password, timeout=20)
+        ssh = _connect_ssh(client)
         sftp = ssh.open_sftp()
         with sftp.file(remote_filename, "w") as handle:
             handle.write(combined_cert)
         sftp.close()
-        ssh.close()
         return True
     except Exception as exc:  # noqa: BLE001
         print(f"ERROR: SFTP upload exception: {exc}")
         return False
+    finally:
+        if ssh is not None:
+            ssh.close()
+
+
+def _connect_ssh(client: RouterOSClient) -> paramiko.SSHClient:
+    """Connect using the shared SSH/SFTP host-key policy."""
+
+    username, password = client.auth
+    ssh = paramiko.SSHClient()
+    if client.settings.sftp_auto_accept_host_key:
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # noqa: S507 - intentional: configured host-key acceptance
+    else:
+        ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
+    ssh.connect(client.hostname, port=22, username=username, password=password, timeout=20)
+    return ssh
+
+
+def restart_www_ssl_via_ssh(client: RouterOSClient) -> None:
+    """Restart only www-ssl when its REST listener remains unavailable."""
+
+    ssh: paramiko.SSHClient | None = None
+    command = '/ip service disable [find name="www-ssl"]; /ip service enable [find name="www-ssl"]'
+    try:
+        print("INFO: REST API is still unavailable; restarting 'www-ssl' once via SSH...")
+        ssh = _connect_ssh(client)
+        _, stdout, stderr = ssh.exec_command(command, timeout=20)
+        exit_status = stdout.channel.recv_exit_status()
+        stderr_text = stderr.read().decode("utf-8", errors="replace").strip()
+        if exit_status != 0:
+            detail = f": {stderr_text}" if stderr_text else ""
+            raise RuntimeError(f"SSH www-ssl restart command failed with exit status {exit_status}{detail}")
+        print("INFO: SSH restarted 'www-ssl'; retrying REST readiness immediately.")
+    except Exception as exc:  # noqa: BLE001
+        if isinstance(exc, RuntimeError):
+            raise
+        raise RuntimeError(f"SSH www-ssl recovery failed: {exc}") from exc
+    finally:
+        if ssh is not None:
+            ssh.close()
+
+
+def update_www_ssl_via_ssh(client: RouterOSClient, cert_name: str) -> None:
+    """Assign the certificate while www-ssl is disabled, using one SSH session."""
+
+    if not cert_name or any(ord(character) < 32 or ord(character) == 127 for character in cert_name):
+        raise ValueError("Certificate name must be nonempty and contain no control characters.")
+    quoted_name = '"' + cert_name.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$") + '"'
+    marker = "MIKROTIK_CERTBOT_WWW_SSL_UPDATED"
+    command = (
+        '{ :local service [/ip service find where name="www-ssl"]; '
+        ':if ([:len $service] != 1) do={ :error "Expected one www-ssl service"; }; '
+        '/ip service disable $service; '
+        ':do { '
+        f'/ip service set $service certificate={quoted_name}; '
+        ':delay 2s; '
+        '} on-error={ '
+        '/ip service enable $service; '
+        ':error "Certificate assignment failed; www-ssl re-enabled"; '
+        '}; '
+        '/ip service enable $service; '
+        f':if ([/ip service get $service certificate] != {quoted_name}) do={{ '
+        ':error "www-ssl certificate verification failed"; }; '
+        f':put "{marker}"; }}'
+    )
+    ssh: paramiko.SSHClient | None = None
+    try:
+        print("INFO: Updating 'www-ssl' via SSH: disable, assign certificate, wait 2s, enable...")
+        ssh = _connect_ssh(client)
+        _, stdout, stderr = ssh.exec_command(command, timeout=20)
+        exit_status = stdout.channel.recv_exit_status()
+        stdout_text = stdout.read().decode("utf-8", errors="replace")
+        stderr_text = stderr.read().decode("utf-8", errors="replace").strip()
+        if exit_status != 0 or stderr_text or marker not in stdout_text.splitlines():
+            detail = f": {stderr_text}" if stderr_text else " (completion marker missing or command failed)"
+            raise RuntimeError(f"SSH www-ssl update failed with exit status {exit_status}{detail}")
+        print("INFO: Certificate assigned and 'www-ssl' re-enabled via SSH.")
+    except Exception as exc:  # noqa: BLE001
+        if isinstance(exc, RuntimeError):
+            raise
+        raise RuntimeError(f"SSH www-ssl update failed: {exc}") from exc
+    finally:
+        if ssh is not None:
+            ssh.close()
 
 
 def delete_uploaded_file(client: RouterOSClient, remote_filename: str) -> bool:
@@ -469,6 +547,46 @@ def _service_uses_certificate(client: RouterOSClient, service_name: str, cert_na
     response.raise_for_status()
     services = response.json()
     return bool(services and services[0].get("certificate") == cert_name)
+
+
+def _rest_api_reachable(client: RouterOSClient) -> bool:
+    response = client.get("system/resource", timeout=10, label="REST readiness check")
+    return bool(response.ok)
+
+
+def wait_for_rest_api(
+    client: RouterOSClient,
+    *,
+    initial_delay: int,
+    attempts: int = 6,
+    delay: float = 2.0,
+) -> None:
+    if initial_delay > 0:
+        print(f"INFO: Waiting {initial_delay}s for REST API to settle after www-ssl update...")
+        time.sleep(initial_delay)
+
+    for attempt in range(1, attempts + 1):
+        try:
+            if _rest_api_reachable(client):
+                print("✅ REST API is ready after www-ssl update.")
+                return
+            reason = "readiness check returned an unsuccessful response"
+        except requests.RequestException as exc:
+            reason = str(exc)
+
+        if attempt < attempts:
+            print(
+                "INFO: REST API is not ready after www-ssl update "
+                f"({attempt}/{attempts}): {reason}. Retrying in {delay:g}s."
+            )
+            time.sleep(delay)
+        else:
+            print(
+                "WARN: REST API is not ready after www-ssl update "
+                f"({attempt}/{attempts}): {reason}."
+            )
+
+    raise RuntimeError("REST API did not become ready after www-ssl certificate update.")
 
 
 def update_ip_service(

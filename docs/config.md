@@ -14,8 +14,9 @@ This project is configured entirely via environment variables. Values are parsed
 ## Behavior toggles
 - `DRY_RUN` (default `false`): Perform validation and logging but do not mutate the router.
 - `FORCE_REIMPORT` (default `false`): Re‑import even if an identical serial already exists on the router.
-- `UPDATE_WWW_SSL` (default `true`): Apply the imported certificate to the `www-ssl` service.
+- `UPDATE_WWW_SSL` (default `true`): Apply the imported certificate to `www-ssl` over SSH: disable the service, assign the certificate, wait 2 seconds, and re-enable it. This briefly interrupts HTTPS/REST and requires SSH access on port 22 with `ssh` and `write` permissions.
 - `UPDATE_API_SSL` (default `true`): Apply the imported certificate to the `api-ssl` service.
+- `WWW_SSL_SETTLE_SECONDS` (default `5`): Seconds to wait after updating `www-ssl` before probing REST readiness and updating other bindings.
 - `HOTSPOT_PROFILE_NAMES` (default empty): One or more Hotspot profiles to update. Accepts comma/space/semicolon, or quoted tokens (e.g., `default, login` or `"My Profile"`).
 - `CERT_NAME` (optional): Override base certificate name. If already versioned (e.g., `_YYYYMMDDThhmm...`), used as‑is; legacy `_YYYYMM` is normalized; otherwise a current timestamp is appended.
 - `KEEP_UPLOADED_FILE` (default `false`): Keep the uploaded PEM file after import.
@@ -23,7 +24,7 @@ This project is configured entirely via environment variables. Values are parsed
 - `DEBUG` (default `false`): Enable concise HTTP summaries for REST calls.
 - `FULL_HTTP_DEBUG` (default `false`): Include response bodies with redaction and size limiting.
 - `HTTP_DEBUG_BODY_LIMIT` (default `2000`): Max characters of body to print when `FULL_HTTP_DEBUG=1`.
-- `SFTP_AUTO_ACCEPT_HOST_KEY` (default `true`): For SFTP fallback, automatically accept unknown SSH host keys. Set to `false` to enforce host key verification.
+- `SFTP_AUTO_ACCEPT_HOST_KEY` (default `true`): For SFTP fallback and SSH service updates/recovery, automatically accept unknown SSH host keys. Set to `false` to enforce host key verification.
 
 ## Internal Usage
 The below environment variables are provided by Certbot at run time. If manually testing script without Certbot, dummy data will need to be provided.
@@ -47,4 +48,3 @@ These variables are used by the optional Certbot deploy hook wrapper:
 - `LE_BASE_PATH` (optional, not used by Python): Base path to Let’s Encrypt live directories if your layout differs; primarily for shell convenience.
 
 Tip: For security, prefer least‑privilege RouterOS credentials and enable `VERIFY_SSL` when the router trusts a known CA.
-

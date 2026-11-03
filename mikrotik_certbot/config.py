@@ -37,6 +37,7 @@ class Settings:
     fullchain_path: Path
     update_www_ssl: bool
     update_api_ssl: bool
+    www_ssl_settle_seconds: int
     debug: bool
     dry_run: bool
     force_reimport: bool
@@ -136,9 +137,12 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         if raw_val is None:
             return default
         try:
-            return int(raw_val)
+            value = int(raw_val)
         except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
             raise ConfigurationError(f"Environment variable {name} must be an integer.") from exc
+        if value < 0:
+            raise ConfigurationError(f"Environment variable {name} must be zero or greater.")
+        return value
 
     return Settings(
         mikrotik_domain=env.get("MIKROTIK_DOMAIN", "your.domain.com"),
@@ -151,6 +155,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         fullchain_path=fullchain_path,
         update_www_ssl=env_bool("UPDATE_WWW_SSL", True, env),
         update_api_ssl=env_bool("UPDATE_API_SSL", True, env),
+        www_ssl_settle_seconds=_int_setting("WWW_SSL_SETTLE_SECONDS", 5),
         debug=env_bool("DEBUG", False, env),
         dry_run=env_bool("DRY_RUN", False, env),
         force_reimport=env_bool("FORCE_REIMPORT", False, env),

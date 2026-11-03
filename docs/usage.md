@@ -87,6 +87,12 @@ sudo RENEWED_DOMAINS=example.com MIKROTIK_DOMAIN=example.com \
 
 The hook gates execution: it exits with a message if `MIKROTIK_DOMAIN` is not present in `RENEWED_DOMAINS`.
 
+## Service update order
+
+When enabled, the workflow updates `www-ssl` first over a single SSH connection: disable the service, assign the new certificate, wait 2 seconds, then re-enable it. This avoids changing the certificate on a live HTTPS listener and deliberately interrupts HTTPS/REST briefly. SSH must be reachable on port 22, even on routers that support REST uploads. If assignment fails, the router-side script attempts to re-enable the service and the run fails.
+
+After SSH confirms the binding, the tool waits `WWW_SSL_SETTLE_SECONDS` seconds (default: 5), probes REST readiness, and only then updates Hotspot profiles and `api-ssl`. If all readiness probes fail, it uses SSH to disable and re-enable only `www-ssl` once, then immediately repeats the REST probes. If the SSH update fails or REST still does not recover, the run stops before any remaining bindings or pruning are changed. Existing certificates are retained; the tool does not automatically roll back the certificate binding.
+
 ## RouterOS version detection and SFTP fallback
 
 At runtime the tool queries RouterOS to decide the upload strategy:
@@ -97,6 +103,8 @@ SFTP notes:
 - Requires the RouterOS SSH service and a user permitted to write files.
 - Only the host part of `ROUTER_HOST` is used for SSH; port is fixed at 22.
 - Host key acceptance is controlled by `SFTP_AUTO_ACCEPT_HOST_KEY` (default: true).
+
+The `www-ssl` SSH update and recovery use the same port, credentials, and host-key setting. They require `ssh` and `write`; `ftp` is only required when SFTP upload fallback is used.
 
 ## Logging and debugging
 

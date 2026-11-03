@@ -6,14 +6,14 @@ Goal: allow certificate upload/import and service/profile updates via REST (and 
 
 Create a dedicated group with only the needed policies.
 
-Without SFTP fallback (REST only):
+With `UPDATE_WWW_SSL=false` and no SFTP fallback (REST only):
 
 ```routeros
 /user group add name=certbot \
   policy="read,write,api,rest-api,!local,!telnet,!ftp,!reboot,!policy,!test,!winbox,!password,!web,!sniff,!sensitive,!romon"
 ```
 
-With SFTP fallback (RouterOS < 7.17) add SSH and FTP:
+With `www-ssl` updates enabled, add SSH for the disable/assign/enable sequence and recovery. Add FTP too when using SFTP upload fallback (RouterOS < 7.17):
 
 ```routeros
 /user group add name=certbot \
@@ -23,7 +23,8 @@ With SFTP fallback (RouterOS < 7.17) add SSH and FTP:
 Notes:
 - `read`/`write` are required to query and patch resources (files, certificates, services, hotspot profiles).
 - `rest-api` is required for the HTTP endpoints; `api` is harmless and sometimes useful for inspection.
-- For SFTP fallback, both `ssh` and `ftp` policies are required on RouterOS to permit file operations over SFTP.
+- SSH `www-ssl` updates and recovery require `ssh` and `write`; they do not use FTP.
+- For SFTP upload fallback, both `ssh` and `ftp` policies are required on RouterOS to permit file operations over SFTP.
 - Avoid enabling `ftp`, `web`, or other interactive policies unless absolutely necessary.
 
 ## Create User
