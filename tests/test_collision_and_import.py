@@ -67,6 +67,7 @@ def test_collision_appends_seq(monkeypatch, tmp_path):
         "import_new_certificate",
         "confirm_certificate_present",
         "update_ip_service",
+        "get_ip_service_certificate",
         "update_www_ssl_via_ssh",
         "update_hotspot_profile",
         "prune_old_certificates",

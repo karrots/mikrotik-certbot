@@ -233,6 +233,46 @@ def test_update_www_ssl_rejects_invalid_names_before_ssh(monkeypatch, cert_name)
         update_www_ssl_via_ssh(SimpleNamespace(), cert_name)
 
 
+def test_rebind_www_ssl_via_ssh_cycles_previous_to_new_certificate(monkeypatch):
+    calls = []
+
+    class Channel:
+        def recv_exit_status(self):
+            return 0
+
+    class Stream:
+        channel = Channel()
+
+        def __init__(self, content):
+            self.content = content
+
+        def read(self):
+            return self.content
+
+    class SSH:
+        def exec_command(self, command, timeout):
+            calls.append((command, timeout))
+            return None, Stream(b"MIKROTIK_CERTBOT_WWW_SSL_REBOUND\r\n"), Stream(b"")
+
+        def close(self):
+            calls.append("close")
+
+    import mikrotik_certbot.routeros as routeros
+
+    monkeypatch.setattr(routeros, "_connect_ssh", lambda client: SSH())
+    routeros.rebind_www_ssl_via_ssh(SimpleNamespace(), "old_cert", "new_cert")
+
+    command = calls[0][0]
+    old_binding = 'set $service certificate="old_cert"'
+    new_binding = 'set $service certificate="new_cert"'
+    assert command.index("disable $service") < command.index(old_binding)
+    assert command.index(old_binding) < command.index(":delay 2s")
+    assert command.index(":delay 2s") < command.index(new_binding)
+    assert command.index(new_binding) < command.rindex("enable $service")
+    assert '} on-error={ /ip service enable $service;' in command
+    assert calls[-1] == "close"
+
+
 def test_workflow_applies_api_ssl_after_other_bindings(monkeypatch, tmp_path):
     lineage = tmp_path
     (lineage / "privkey.pem").write_text("dummy", encoding="utf-8")
@@ -255,6 +295,7 @@ def test_workflow_applies_api_ssl_after_other_bindings(monkeypatch, tmp_path):
     monkeypatch.setattr(wf, "get_local_cert_serial", lambda path: None)
     monkeypatch.setattr(wf, "find_existing_certificate", lambda client, cert_name: None)
     monkeypatch.setattr(wf, "find_certificate_by_serial", lambda client, serial: None)
+    monkeypatch.setattr(wf, "get_ip_service_certificate", lambda *args: None)
     monkeypatch.setattr(wf, "upload_certificate", lambda *args, **kwargs: calls.append("upload"))
     monkeypatch.setattr(wf, "confirm_file_exists", lambda *args, **kwargs: calls.append("file-confirm"))
     monkeypatch.setattr(wf, "remove_old_certificate", lambda *args, **kwargs: calls.append("remove-check"))
@@ -309,6 +350,7 @@ def test_workflow_recovers_www_ssl_once_before_remaining_rest_updates(monkeypatc
     monkeypatch.setattr(wf, "get_local_cert_serial", lambda path: None)
     monkeypatch.setattr(wf, "find_existing_certificate", lambda client, cert_name: None)
     monkeypatch.setattr(wf, "find_certificate_by_serial", lambda client, serial: None)
+    monkeypatch.setattr(wf, "get_ip_service_certificate", lambda *args: "old_cert")
     monkeypatch.setattr(wf, "upload_certificate", lambda *args, **kwargs: None)
     monkeypatch.setattr(wf, "confirm_file_exists", lambda *args, **kwargs: None)
     monkeypatch.setattr(wf, "remove_old_certificate", lambda *args, **kwargs: None)
@@ -318,8 +360,8 @@ def test_workflow_recovers_www_ssl_once_before_remaining_rest_updates(monkeypatc
     monkeypatch.setattr(wf, "prune_old_certificates", lambda *args, **kwargs: calls.append("prune"))
     monkeypatch.setattr(wf, "update_ip_service", lambda *args, **kwargs: calls.append(args[1]))
     monkeypatch.setattr(wf, "update_www_ssl_via_ssh", lambda *args: calls.append("www-ssl"))
+    monkeypatch.setattr(wf, "rebind_www_ssl_via_ssh", lambda *args: calls.append("ssh-rebind"))
     monkeypatch.setattr(wf, "update_hotspot_profile", lambda *args, **kwargs: calls.append("hotspot"))
-    monkeypatch.setattr(wf, "restart_www_ssl_via_ssh", lambda client: calls.append("ssh-restart"))
 
     waits = iter([RuntimeError("initial REST failure"), None])
 
@@ -335,7 +377,7 @@ def test_workflow_recovers_www_ssl_once_before_remaining_rest_updates(monkeypatc
     assert calls == [
         "www-ssl",
         ("wait", {"initial_delay": 5}),
-        "ssh-restart",
+        "ssh-rebind",
         ("wait", {"initial_delay": 0}),
         "hotspot",
         "api-ssl",
@@ -366,6 +408,7 @@ def test_workflow_stops_before_other_updates_when_ssh_fails(monkeypatch, tmp_pat
     monkeypatch.setattr(wf, "get_local_cert_serial", lambda path: None)
     monkeypatch.setattr(wf, "find_existing_certificate", lambda client, cert_name: None)
     monkeypatch.setattr(wf, "find_certificate_by_serial", lambda client, serial: None)
+    monkeypatch.setattr(wf, "get_ip_service_certificate", lambda *args: None)
     monkeypatch.setattr(wf, "upload_certificate", lambda *args, **kwargs: None)
     monkeypatch.setattr(wf, "confirm_file_exists", lambda *args, **kwargs: None)
     monkeypatch.setattr(wf, "remove_old_certificate", lambda *args, **kwargs: None)

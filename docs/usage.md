@@ -91,7 +91,7 @@ The hook gates execution: it exits with a message if `MIKROTIK_DOMAIN` is not pr
 
 When enabled, the workflow updates `www-ssl` first over a single SSH connection: disable the service, assign the new certificate, wait 2 seconds, then re-enable it. This avoids changing the certificate on a live HTTPS listener and deliberately interrupts HTTPS/REST briefly. SSH must be reachable on port 22, even on routers that support REST uploads. If assignment fails, the router-side script attempts to re-enable the service and the run fails.
 
-After SSH confirms the binding, the tool waits `WWW_SSL_SETTLE_SECONDS` seconds (default: 5), probes REST readiness, and only then updates Hotspot profiles and `api-ssl`. If all readiness probes fail, it uses SSH to disable and re-enable only `www-ssl` once, then immediately repeats the REST probes. If the SSH update fails or REST still does not recover, the run stops before any remaining bindings or pruning are changed. Existing certificates are retained; the tool does not automatically roll back the certificate binding.
+After SSH confirms the binding, the tool waits `WWW_SSL_SETTLE_SECONDS` seconds (default: 5), probes REST readiness, and only then updates Hotspot profiles and `api-ssl`. If all readiness probes fail and a previous certificate was assigned, it makes one SSH recovery attempt that disables `www-ssl`, reassigns the previous certificate, then reassigns the new one before re-enabling the service. If no previous binding was available, it restarts `www-ssl` over SSH instead. REST readiness is then checked again. If recovery fails, the run stops before any remaining bindings or pruning are changed. Both certificates are retained.
 
 ## RouterOS version detection and SFTP fallback
 

@@ -25,6 +25,8 @@ __all__ = [
     "import_new_certificate",
     "remove_old_certificate",
     "restart_www_ssl_via_ssh",
+    "get_ip_service_certificate",
+    "rebind_www_ssl_via_ssh",
     "update_www_ssl_via_ssh",
     "wait_for_rest_api",
     "update_hotspot_profile",
@@ -423,12 +425,85 @@ def restart_www_ssl_via_ssh(client: RouterOSClient) -> None:
             ssh.close()
 
 
+def get_ip_service_certificate(client: RouterOSClient, service_name: str) -> str | None:
+    """Return the currently assigned certificate name, if the service has one."""
+
+    response = client.get(
+        "ip/service",
+        params={"name": service_name},
+        label=f"service certificate lookup '{service_name}'",
+    )
+    response.raise_for_status()
+    services = response.json()
+    if not services:
+        return None
+    certificate = services[0].get("certificate")
+    if not isinstance(certificate, str) or not certificate or certificate.lower() == "none":
+        return None
+    return certificate
+
+
+def _quote_routeros_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$") + '"'
+
+
+def _validate_certificate_name(cert_name: str) -> None:
+    if not cert_name or any(ord(character) < 32 or ord(character) == 127 for character in cert_name):
+        raise ValueError("Certificate name must be nonempty and contain no control characters.")
+
+
+def rebind_www_ssl_via_ssh(client: RouterOSClient, previous_cert_name: str, cert_name: str) -> None:
+    """Rebind www-ssl to its previous certificate and back to the new one over SSH."""
+
+    _validate_certificate_name(previous_cert_name)
+    _validate_certificate_name(cert_name)
+    quoted_previous = _quote_routeros_string(previous_cert_name)
+    quoted_new = _quote_routeros_string(cert_name)
+    marker = "MIKROTIK_CERTBOT_WWW_SSL_REBOUND"
+    command = (
+        '{ :local service [/ip service find where name="www-ssl"]; '
+        ':if ([:len $service] != 1) do={ :error "Expected one www-ssl service"; }; '
+        '/ip service disable $service; '
+        ':do { '
+        f'/ip service set $service certificate={quoted_previous}; '
+        ':delay 2s; '
+        f'/ip service set $service certificate={quoted_new}; '
+        ':delay 2s; '
+        '} on-error={ '
+        '/ip service enable $service; '
+        ':error "Certificate rebind failed; www-ssl re-enabled"; '
+        '}; '
+        '/ip service enable $service; '
+        f':if ([/ip service get $service certificate] != {quoted_new}) do={{ '
+        ':error "www-ssl certificate verification failed"; }; '
+        f':put "{marker}"; }}'
+    )
+    ssh: paramiko.SSHClient | None = None
+    try:
+        print("INFO: REST is unavailable; rebinding 'www-ssl' to the previous certificate and back to the new one via SSH...")
+        ssh = _connect_ssh(client)
+        _, stdout, stderr = ssh.exec_command(command, timeout=20)
+        exit_status = stdout.channel.recv_exit_status()
+        stdout_text = stdout.read().decode("utf-8", errors="replace")
+        stderr_text = stderr.read().decode("utf-8", errors="replace").strip()
+        if exit_status != 0 or stderr_text or marker not in stdout_text.splitlines():
+            detail = f": {stderr_text}" if stderr_text else " (completion marker missing or command failed)"
+            raise RuntimeError(f"SSH www-ssl certificate rebind failed with exit status {exit_status}{detail}")
+        print("INFO: Rebound 'www-ssl' to the previous certificate and back to the new certificate.")
+    except Exception as exc:  # noqa: BLE001
+        if isinstance(exc, RuntimeError):
+            raise
+        raise RuntimeError(f"SSH www-ssl certificate rebind failed: {exc}") from exc
+    finally:
+        if ssh is not None:
+            ssh.close()
+
+
 def update_www_ssl_via_ssh(client: RouterOSClient, cert_name: str) -> None:
     """Assign the certificate while www-ssl is disabled, using one SSH session."""
 
-    if not cert_name or any(ord(character) < 32 or ord(character) == 127 for character in cert_name):
-        raise ValueError("Certificate name must be nonempty and contain no control characters.")
-    quoted_name = '"' + cert_name.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$") + '"'
+    _validate_certificate_name(cert_name)
+    quoted_name = _quote_routeros_string(cert_name)
     marker = "MIKROTIK_CERTBOT_WWW_SSL_UPDATED"
     command = (
         '{ :local service [/ip service find where name="www-ssl"]; '

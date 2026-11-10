@@ -17,8 +17,10 @@ from .routeros import (
     extract_remote_serial,
     find_certificate_by_serial,
     find_existing_certificate,
+    get_ip_service_certificate,
     import_new_certificate,
     prune_old_certificates,
+    rebind_www_ssl_via_ssh,
     remove_old_certificate,
     restart_www_ssl_via_ssh,
     update_hotspot_profile,
@@ -222,14 +224,21 @@ def run(settings: Settings) -> bool:
                 "DRY-RUN: Would wait "
                 f"{settings.www_ssl_settle_seconds}s and verify REST API readiness after 'www-ssl'"
             )
-            print("DRY-RUN: Would restart only 'www-ssl' via SSH if REST readiness remained unavailable")
+            print(
+                "DRY-RUN: Would rebind 'www-ssl' from its previous certificate to the new one via SSH "
+                "if REST readiness remained unavailable"
+            )
         else:
+            previous_www_certificate = get_ip_service_certificate(client, "www-ssl")
             update_www_ssl_via_ssh(client, cert_name)
             try:
                 wait_for_rest_api(client, initial_delay=settings.www_ssl_settle_seconds)
             except RuntimeError as initial_rest_error:
                 try:
-                    restart_www_ssl_via_ssh(client)
+                    if previous_www_certificate and previous_www_certificate != cert_name:
+                        rebind_www_ssl_via_ssh(client, previous_www_certificate, cert_name)
+                    else:
+                        restart_www_ssl_via_ssh(client)
                 except RuntimeError as ssh_error:
                     raise RuntimeError(
                         "REST API did not recover after www-ssl update, and SSH recovery failed: "
@@ -239,7 +248,7 @@ def run(settings: Settings) -> bool:
                     wait_for_rest_api(client, initial_delay=0)
                 except RuntimeError as recovery_rest_error:
                     raise RuntimeError(
-                        "REST API did not recover after SSH restarted www-ssl "
+                        "REST API did not recover after SSH www-ssl recovery "
                         f"(initial readiness failure: {initial_rest_error}; recovery failure: {recovery_rest_error})"
                     ) from recovery_rest_error
 
